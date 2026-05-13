@@ -1,0 +1,71 @@
+version: 1
+
+id: tabletop_arm
+name: Tabletop Arm Simulator
+description: Example simulator/replay profile for a small arm with wrist camera.
+
+joints:
+  groups:
+    arm:
+      names:
+        - shoulder_pan
+        - shoulder_lift
+        - elbow
+        - wrist_1
+        - wrist_2
+        - wrist_3
+      limits:
+        position:
+          min: [-3.14, -2.5, -2.5, -3.14, -3.14, -3.14]
+          max: [3.14, 2.5, 2.5, 3.14, 3.14, 3.14]
+        velocity:
+          max: [2.0, 2.0, 2.0, 3.0, 3.0, 3.0]
+    gripper:
+      names:
+        - gripper_width
+      limits:
+        position:
+          min: [0.0]
+          max: [0.08]
+
+sensors:
+  cameras:
+    wrist:
+      width: 640
+      height: 480
+      channels: 3
+      encoding: rgb8
+      frame_id: wrist_camera
+    overhead:
+      width: 1280
+      height: 720
+      channels: 3
+      encoding: rgb8
+      frame_id: overhead_camera
+
+frames:
+  world: world
+  base: arm_base
+  end_effector: tool0
+  cameras:
+    wrist: wrist_camera
+    overhead: overhead_camera
+
+commands:
+  default_mode: joint_position
+  frequency_hz: 20
+  target_groups:
+    - arm
+    - gripper
+
+io_presets:
+  replay_fake_output:
+    input:
+      type: replay
+    output:
+      type: fake
+  sim:
+    input:
+      type: simulator
+    output:
+      type: simulator

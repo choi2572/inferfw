@@ -1,0 +1,42 @@
+version: 1
+
+id: onnx_tabletop_policy
+name: ONNX Tabletop Policy
+description: Example ONNX policy model profile for simulator/replay evaluation.
+
+runtime:
+  default: onnx_runtime
+  supported:
+    - onnx_runtime
+
+input_schema:
+  required:
+    image:
+      dtype: float32
+      shape: [1, 3, 128, 128]
+      source: wrist_camera
+    proprio:
+      dtype: float32
+      shape: [1, 7]
+
+output_schema:
+  required:
+    action:
+      dtype: float32
+      shape: [1, 7]
+      units: rad
+
+frequency:
+  target_hz: 20
+
+latency:
+  expected_ms: 10
+  budget_ms: 50
+
+artifact:
+  type: local_file
+  path_param: model_path
+  format: onnx
+
+warmup:
+  sample: generated

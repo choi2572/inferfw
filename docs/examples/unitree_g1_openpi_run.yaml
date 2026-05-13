@@ -1,0 +1,108 @@
+version: 1
+
+run:
+  name: unitree_g1_openpi_vla
+  description: Real-oriented Unitree G1 plus OpenPI-style VLA run shape.
+  seed: 7
+  tags:
+    - unitree_g1
+    - openpi
+    - vla
+    - ros2
+    - dds
+
+robot:
+  profile: unitree_g1_profile.yaml
+  observation_mapper: unitree_g1_observation_mapper
+  action_mapper: unitree_g1_action_mapper
+  params:
+    control_mode: joint_position
+    command_safety: clamp
+
+model:
+  profile: openpi_vla_profile.yaml
+  runtime: openpi_torch
+  params:
+    device: cuda:0
+    checkpoint: /models/openpi/checkpoint.pt
+    dtype: bfloat16
+
+input:
+  type: ros2
+  params:
+    observation_topic: /g1/observation
+    image_topics:
+      front: /g1/camera/front/image
+      left_wrist: /g1/camera/left_wrist/image
+      right_wrist: /g1/camera/right_wrist/image
+    joint_topic: /g1/joint_states
+    timeout_ms: 100
+
+output:
+  type: unitree_dds
+  params:
+    domain_id: 0
+    command_topic: lowcmd
+    publish_hz: 10
+
+preprocess:
+  - type: resize_image
+    params:
+      cameras:
+        - front
+        - left_wrist
+        - right_wrist
+      width: 224
+      height: 224
+  - type: normalize_image
+    params:
+      cameras:
+        - front
+        - left_wrist
+        - right_wrist
+      mode: imagenet
+  - type: stack_history
+    params:
+      keys:
+        - joints.left_arm
+        - joints.right_arm
+      length: 2
+  - type: openpi_input_builder
+    params:
+      image_keys:
+        - front
+        - left_wrist
+        - right_wrist
+      joint_groups:
+        - left_arm
+        - right_arm
+        - waist
+      instruction_source: run_context
+
+postprocess:
+  - type: openpi_output_parser
+    params:
+      output_key: action
+      target_groups:
+        - left_arm
+        - right_arm
+  - type: clamp_joint_limits
+    params:
+      source: robot_profile
+  - type: validate_action
+
+lifecycle:
+  warmup: true
+  loop_hz: 10
+  stop_on_error: true
+  pause_policy:
+    read_input: true
+    run_inference: false
+    publish_output: false
+
+logging:
+  level: info
+  output_dir: runs/
+  write_resolved_config: true
+  write_iteration_summary: true
+  include_data_summaries: true

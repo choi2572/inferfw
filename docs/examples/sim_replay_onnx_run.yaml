@@ -1,0 +1,80 @@
+version: 1
+
+run:
+  name: sim_replay_onnx_policy
+  description: Replay or simulator-oriented run using an ONNX policy runtime.
+  seed: 42
+  tags:
+    - simulator
+    - replay
+    - onnx
+
+robot:
+  profile: tabletop_arm_profile.yaml
+  observation_mapper: tabletop_arm_observation_mapper
+  action_mapper: tabletop_arm_action_mapper
+  params:
+    control_mode: joint_position
+
+model:
+  profile: onnx_policy_profile.yaml
+  runtime: onnx_runtime
+  params:
+    model_path: /models/tabletop_policy/policy.onnx
+    providers:
+      - CPUExecutionProvider
+
+input:
+  type: replay
+  params:
+    path: /datasets/tabletop_eval/replay_001.jsonl
+    timeout_ms: 50
+    loop: false
+
+output:
+  type: fake
+  params:
+    capture: true
+    write_commands: true
+
+preprocess:
+  - type: resize_image
+    params:
+      camera: wrist
+      width: 128
+      height: 128
+  - type: normalize_image
+    params:
+      camera: wrist
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+  - type: concat_joint_group
+    params:
+      groups:
+        - arm
+        - gripper
+      output_key: proprio
+  - type: onnx_policy_input_builder
+
+postprocess:
+  - type: onnx_policy_output_parser
+    params:
+      action_key: action
+      target_joint_group: arm
+  - type: clamp_joint_limits
+    params:
+      source: robot_profile
+  - type: validate_action
+
+lifecycle:
+  warmup: true
+  max_iterations: 100
+  loop_hz: 20
+  stop_on_error: true
+
+logging:
+  level: info
+  output_dir: runs/
+  write_resolved_config: true
+  write_iteration_summary: true
+  include_data_summaries: true

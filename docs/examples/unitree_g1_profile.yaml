@@ -1,0 +1,93 @@
+version: 1
+
+id: unitree_g1
+name: Unitree G1
+description: Example real-oriented robot profile for Unitree G1 integration.
+
+joints:
+  groups:
+    waist:
+      names:
+        - waist_yaw
+        - waist_roll
+        - waist_pitch
+      limits:
+        position:
+          min: [-1.57, -0.5, -0.5]
+          max: [1.57, 0.5, 0.5]
+    left_arm:
+      names:
+        - left_shoulder_pitch
+        - left_shoulder_roll
+        - left_shoulder_yaw
+        - left_elbow
+        - left_wrist_roll
+        - left_wrist_pitch
+        - left_wrist_yaw
+      limits:
+        position:
+          min: [-2.5, -1.5, -2.0, -2.0, -1.5, -1.0, -1.5]
+          max: [2.5, 1.5, 2.0, 0.0, 1.5, 1.0, 1.5]
+    right_arm:
+      names:
+        - right_shoulder_pitch
+        - right_shoulder_roll
+        - right_shoulder_yaw
+        - right_elbow
+        - right_wrist_roll
+        - right_wrist_pitch
+        - right_wrist_yaw
+      limits:
+        position:
+          min: [-2.5, -1.5, -2.0, -2.0, -1.5, -1.0, -1.5]
+          max: [2.5, 1.5, 2.0, 0.0, 1.5, 1.0, 1.5]
+
+sensors:
+  cameras:
+    front:
+      width: 1280
+      height: 720
+      channels: 3
+      encoding: rgb8
+      frame_id: head_camera
+    left_wrist:
+      width: 640
+      height: 480
+      channels: 3
+      encoding: rgb8
+      frame_id: left_wrist_camera
+    right_wrist:
+      width: 640
+      height: 480
+      channels: 3
+      encoding: rgb8
+      frame_id: right_wrist_camera
+
+frames:
+  world: world
+  base: pelvis
+  cameras:
+    front: head_camera
+    left_wrist: left_wrist_camera
+    right_wrist: right_wrist_camera
+  end_effectors:
+    left: left_hand
+    right: right_hand
+
+commands:
+  default_mode: joint_position
+  frequency_hz: 10
+  target_groups:
+    - waist
+    - left_arm
+    - right_arm
+  conventions:
+    joint_units: rad
+    command_transport: unitree_dds
+
+io_presets:
+  ros2_dds:
+    input:
+      type: ros2
+    output:
+      type: unitree_dds

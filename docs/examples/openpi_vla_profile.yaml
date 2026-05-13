@@ -1,0 +1,57 @@
+version: 1
+
+id: openpi_vla
+name: OpenPI VLA
+description: Example OpenPI-style VLA model profile for embodied model evaluation.
+
+runtime:
+  default: openpi_torch
+  supported:
+    - openpi_torch
+    - remote_http_runtime
+
+input_schema:
+  required:
+    images:
+      dtype: float32
+      shape: [1, 3, 3, 224, 224]
+      convention: batch_camera_channel_height_width
+      cameras:
+        - front
+        - left_wrist
+        - right_wrist
+    proprio:
+      dtype: float32
+      shape: [1, 17]
+      groups:
+        - left_arm
+        - right_arm
+        - waist
+    instruction:
+      dtype: string
+      shape: scalar
+
+output_schema:
+  required:
+    action:
+      dtype: float32
+      shape: [1, 14]
+      groups:
+        - left_arm
+        - right_arm
+      units: rad
+
+frequency:
+  target_hz: 10
+
+latency:
+  expected_ms: 80
+  budget_ms: 100
+
+artifact:
+  type: local_file
+  path_param: checkpoint
+  format: torch_checkpoint
+
+warmup:
+  sample: generated

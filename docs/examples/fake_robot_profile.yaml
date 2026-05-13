@@ -1,0 +1,46 @@
+version: 1
+
+id: fake_robot
+name: Fake Robot
+description: Minimal fake robot profile for dependency-free MVP smoke tests.
+
+joints:
+  groups:
+    arm:
+      names:
+        - joint_1
+        - joint_2
+      limits:
+        position:
+          min: [-1.0, -1.0]
+          max: [1.0, 1.0]
+        velocity:
+          max: [2.0, 2.0]
+
+sensors:
+  cameras:
+    front:
+      width: 64
+      height: 64
+      channels: 3
+      encoding: rgb8
+      frame_id: camera_front
+
+frames:
+  world: world
+  base: base_link
+  cameras:
+    front: camera_front
+
+commands:
+  default_mode: joint_position
+  frequency_hz: 10
+  target_groups:
+    - arm
+
+io_presets:
+  fake:
+    input:
+      type: fake
+    output:
+      type: fake

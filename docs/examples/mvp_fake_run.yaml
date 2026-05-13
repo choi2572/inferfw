@@ -1,0 +1,64 @@
+version: 1
+
+run:
+  name: mvp_fake
+  description: Dependency-free fake smoke run for the MVP service loop.
+  seed: 0
+  tags:
+    - smoke
+    - fake
+    - mvp
+
+robot:
+  profile: fake_robot_profile.yaml
+  observation_mapper: fake_observation_mapper
+  action_mapper: fake_action_mapper
+
+model:
+  profile: dummy_model_profile.yaml
+  runtime: dummy_runtime
+  params:
+    latency_ms: 1
+
+input:
+  type: fake
+  params:
+    num_messages: 1
+    timeout_ms: 100
+    include_image: true
+    include_instruction: true
+
+output:
+  type: fake
+  params:
+    capture: true
+
+preprocess:
+  - type: identity
+  - type: dummy_input_builder
+    params:
+      image_key: front
+      joint_group: arm
+      instruction_source: observation_extras
+
+postprocess:
+  - type: dummy_output_parser
+    params:
+      target_joint_group: arm
+  - type: validate_action
+
+lifecycle:
+  warmup: true
+  max_iterations: 1
+  stop_on_error: true
+  pause_policy:
+    read_input: true
+    run_inference: false
+    publish_output: false
+
+logging:
+  level: info
+  output_dir: runs/
+  write_resolved_config: true
+  write_iteration_summary: true
+  include_data_summaries: true
