@@ -8,8 +8,8 @@ The priority is to build an executable fake end-to-end inference service loop fi
 
 The MVP implementation is complete when:
 
-- `inferfw validate --config configs/mvp_fake.yaml` validates a fake run config
-- `inferfw run --config configs/mvp_fake.yaml` runs one fake inference iteration
+- `inferfw validate --config config/pipeline_example.yaml` validates the canonical pipeline config
+- `inferfw run --config config/pipeline_example.yaml` runs one inference iteration with configured runtime components
 - model warmup runs and does not publish output
 - fake output adapter captures one robot command
 - run logs include resolved config, lifecycle events, and inference latency
@@ -53,8 +53,7 @@ inferfw/
   logging/
   plugins/
 tests/
-configs/
-profiles/
+config/
 ```
 
 Acceptance:
@@ -92,24 +91,24 @@ Acceptance:
 
 ## 5. Milestone 2: Config Loader and Validation
 
-Goal: load and validate run config, robot profile, and model profile.
+Goal: load and validate the pipeline config.
 
 Deliverables:
 
 - YAML config loader
-- run config schema
-- robot profile schema
-- model profile schema
-- profile resolution
+- pipeline config schema
+- request server schema
+- robot execution schema
+- model binding schema
 - validation errors
 
 Acceptance:
 
-- valid fake config loads
+- valid `config/pipeline_example.yaml` loads
 - missing top-level section fails
-- unknown config version fails
-- missing robot/model profile fails
-- selected model runtime unsupported by model profile fails
+- unsupported request server type fails
+- malformed model binding fails
+- unresolved processor or runtime config fails
 
 ## 6. Milestone 3: Local Plugin Registry
 

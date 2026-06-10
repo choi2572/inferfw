@@ -16,6 +16,20 @@ The framework should make the following changes possible without editing runtime
 
 The framework core owns execution. Plugins own semantics. Configs compose the run.
 
+### 1.1 Concept Reference
+
+`refer/inferfw` is a concept reference for the model runtime boundary. It is intentionally narrower than the full architecture in this document.
+
+It demonstrates:
+
+- `ModelRuntime` as a plugin contract
+- backend-agnostic `ModelInput` and `ModelOutput` containers
+- entry point based model runtime resolution
+- a minimal `ModelRuntimeSession` for model load, warmup, inference, unload, and latency measurement
+- the `inferfw-openpi` package shape for an external model runtime plugin
+
+It does not yet implement the full request server, robot command path, processor chain, adapter orchestration, or end-to-end service loop.
+
 ## 2. MVP System View
 
 ```text
@@ -124,21 +138,20 @@ Configs select and compose components.
 
 Configs define:
 
-- which robot profile to use
-- which model profile to use
-- which adapters to instantiate
-- which processors to run
-- component params
+- request server type and endpoints
+- robot command conventions and topics
+- model runtime keys, runtime config names, and artifact paths
+- model input and output interface bindings
+- processor groups and ordered processor steps
 - runtime params
-- logging params
 
 Configs should not contain executable behavior.
 
-### 4.4 Profiles
+### 4.4 Plugin Metadata
 
-Profiles describe metadata and conventions.
+Plugin packages may provide metadata and schemas used by validation.
 
-Robot profiles describe:
+Robot integration metadata can describe:
 
 - joints
 - joint groups
@@ -146,9 +159,9 @@ Robot profiles describe:
 - sensors
 - frames
 - command conventions
-- IO presets
+- command topics
 
-Model profiles describe:
+Model integration metadata can describe:
 
 - input schema
 - output schema
@@ -157,7 +170,9 @@ Model profiles describe:
 - warmup input requirements
 - expected frequency or latency hints
 
-Profiles should not perform runtime logic.
+This metadata may live in Python classes, package resources, YAML files, or generated schemas owned by the plugin package. Framework core should consume declared metadata through stable interfaces rather than importing plugin internals directly.
+
+Plugin metadata should not perform runtime logic.
 
 ## 5. MVP Component Responsibilities
 

@@ -40,34 +40,34 @@ local Python process
 Target commands:
 
 ```bash
-inferfw validate --config configs/mvp_fake.yaml
-inferfw run --config configs/mvp_fake.yaml
+inferfw validate --config config/pipeline_example.yaml
+inferfw run --config config/pipeline_example.yaml
 inferfw list-plugins
 ```
 
-The first deployable target is a fake smoke run.
+The first deployable target is the canonical pipeline config with fake or selected runtime components depending on the installed plugins.
 
 ## 3. CLI Contract
 
 ### validate
 
 ```bash
-inferfw validate --config configs/mvp_fake.yaml
+inferfw validate --config config/pipeline_example.yaml
 ```
 
 Expected behavior:
 
 - load config
 - register built-in plugins
-- resolve profiles
-- validate plugin keys
+- resolve request server, processor, and model runtime keys
+- validate robot and model bindings
 - print validation result
 - exit non-zero on validation failure
 
 ### run
 
 ```bash
-inferfw run --config configs/mvp_fake.yaml
+inferfw run --config config/pipeline_example.yaml
 ```
 
 Expected behavior:
@@ -117,30 +117,21 @@ inferfw = "inferfw.cli:main"
 
 Exact packaging can be finalized during implementation.
 
-## 5. Config and Profile Paths
+## 5. Config Paths
 
 Recommended project layout:
 
 ```text
-configs/
-  mvp_fake.yaml
-  mvp_g1_vla.yaml
-
-profiles/
-  robots/
-    fake_robot.yaml
-    unitree_g1.yaml
-  models/
-    dummy_model.yaml
-    openpi_vla.yaml
+config/
+  pipeline_example.yaml
 ```
 
 Path resolution policy:
 
 - config path is passed explicitly
-- profile ids can resolve through configured profile search paths
-- direct profile file paths may also be supported
-- resolved config should record final resolved paths
+- model artifact paths are read from `pipeline.models.<model_id>.model_path`
+- transport topics are read from model bindings and robot topics
+- resolved config should record final resolved config path and model artifact paths
 
 MVP can start with simple relative path resolution from project root or config file directory.
 
@@ -251,17 +242,26 @@ MVP real-oriented stubs can document required params without implementing full t
 Example:
 
 ```yaml
-input:
+request_server:
   type: ros2
-  params:
-    observation_topic: /g1/observation
-    timeout_ms: 100
 
-output:
-  type: unitree_dds
-  params:
-    domain_id: 0
-    command_topic: lowcmd
+pipeline:
+  models:
+    g1_vla:
+      runtime: openpi
+      config_name: act_g1
+      model_path: /workspace/sim_models/act_sim_model/
+      input_interface:
+        bindings:
+          left_img:
+            topic: /cam/left/image_raw_color/compressed
+            message_type: sensor_msgs/CompressedImage
+
+robot:
+  topics:
+    joint_command:
+      topic: /joint/command/joint_state
+      message_type: sensor_msgs/JointState
 ```
 
 ## 11. GPU and Model Runtime Deployment
@@ -280,11 +280,12 @@ Real model runtime deployment should document:
 Example:
 
 ```yaml
-model:
-  runtime: openpi_torch
-  params:
-    device: cuda:0
-    checkpoint: /models/openpi/checkpoint.pt
+pipeline:
+  models:
+    g1_vla:
+      runtime: openpi
+      config_name: act_g1
+      model_path: /models/openpi/checkpoint
 ```
 
 Missing model artifacts or GPU dependencies should fail before `RUNNING`.

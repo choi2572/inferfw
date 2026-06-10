@@ -6,8 +6,6 @@ import logging
 
 from inferfw.data.model import ModelInput
 from inferfw.data.model import ModelOutput
-from inferfw.data.pi import PIInput
-from inferfw.data.pi import PIOutput
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +54,12 @@ class OpenPiModelRuntime:
         if self._model is None:
             msg = "Policy is not loaded; call load_model() first."
             raise RuntimeError(msg)
+        if sample is None:
+            msg = "openpi warmup requires a ModelInput sample (e.g. from openpi_input_builder)."
+            raise ValueError(msg)
 
-        warming_input = PIInput.from_model_input(sample) if sample is not None else PIInput()
         for _ in range(_WARMUP_ITERATIONS):
-            _ = self._model.infer(warming_input.data)
+            _ = self._model.infer(sample.data)
             _cuda_synchronize()
 
     def infer(self, model_input: ModelInput) -> ModelOutput:
@@ -67,10 +67,13 @@ class OpenPiModelRuntime:
             msg = "Policy is not loaded; call load_model() first."
             raise RuntimeError(msg)
 
-        pi_input = PIInput.from_model_input(model_input)
-        policy_output = self._model.infer(pi_input.data)
+        policy_output = self._model.infer(model_input.data)
         _cuda_synchronize()
-        return PIOutput.from_actions(policy_output["actions"]).to_model_output()
+        return self._to_model_output(policy_output)
+
+    @staticmethod
+    def _to_model_output(policy_output: dict) -> ModelOutput:
+        return ModelOutput.from_dict({"actions": policy_output["actions"]})
 
     def unload(self) -> None:
         self._model = None

@@ -340,43 +340,63 @@ MVP에서는 lifecycle transition을 명시적으로 검증한다. 예를 들어
 
 MVP는 YAML config 기반 실행을 기본으로 한다.
 
-Main run config 예:
+Pipeline config 예:
 
 ```yaml
-run:
-  name: mvp_vla_g1
+request_server:
+  type: ros2
+  node_name: inferfw
+  services:
+    load_model: /inferfw/load_model
+    unload_model: /inferfw/unload_model
+    infer: /inferfw/infer
+    set_task: /inferfw/set_task
+    set_operation_mode: /inferfw/set_operation_mode
 
 robot:
-  profile: unitree_g1
+  name: g129dof
+  action_class: G1Action
+  loop_hz: 30.0
+  joint_config:
+    torso: 6
+    right_arm: 7
+    left_arm: 7
+    right_hand: 12
+    left_hand: 12
 
-model:
-  profile: openpi_vla
-  runtime: openpi_torch
-
-input:
-  type: ros2
-  params:
-    observation_topic: /robot/observation
-
-output:
-  type: unitree_dds
-  params:
-    domain_id: 0
-
-preprocess:
-  - type: resize_image
-    params:
-      width: 224
-      height: 224
-  - type: openpi_input_builder
-
-postprocess:
-  - type: openpi_output_parser
-  - type: clamp_joint_limits
-
-logging:
-  level: info
-  output_dir: runs/
+pipeline:
+  name: g129dof_vla_test1
+  preprocess:
+    groups:
+      - keys: [left_img, left_wrist_img, right_img, right_wrist_img]
+        steps:
+          - name: resize
+            params:
+              width: 224
+              height: 224
+              mode: bilinear
+  models:
+    g1_vla:
+      runtime: openpi
+      config_name: act_g1
+      model_path: /workspace/sim_models/act_sim_model/
+      input_interface:
+        bindings:
+          left_img:
+            topic: /cam/left/image_raw_color/compressed
+            message_type: sensor_msgs/CompressedImage
+      output_interface:
+        bindings:
+          actions:
+            type: joint_trajectory
+            groups: [torso, right_arm, left_arm, right_hand, left_hand]
+  postprocess:
+    groups:
+      - keys: [actions]
+        steps:
+          - name: resample_action
+            params:
+              target_hz: 30
 ```
 
 Config validation은 MVP에서 필수이다. 실행 중 필요한 plugin, profile, processor가 resolve되지 않으면 `configure` 단계에서 실패해야 한다.
@@ -464,8 +484,8 @@ MVP 배포는 local process 실행을 기본으로 한다.
 초기 실행 방식:
 
 ```bash
-inferfw validate --config configs/mvp_run.yaml
-inferfw run --config configs/mvp_run.yaml
+inferfw validate --config config/pipeline_example.yaml
+inferfw run --config config/pipeline_example.yaml
 inferfw list-plugins
 ```
 

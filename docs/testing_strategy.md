@@ -145,21 +145,20 @@ Test cleanup:
 Test failures:
 
 - missing top-level section
-- unsupported config version
-- unknown input adapter key
-- unknown output adapter key
-- unknown mapper key
+- unsupported request server type
+- malformed model input binding
+- malformed model output binding
 - unknown processor key
 - unknown model runtime key
-- missing robot profile
-- missing model profile
-- selected runtime not supported by model profile
+- invalid robot joint config
+- postprocess output group not present in robot joint config
 
 Test success:
 
-- fake run config validates
-- disabled processor is omitted from resolved chain
+- `config/pipeline_example.yaml` validates
 - processor order is preserved
+- preprocess keys align with model input bindings
+- postprocess keys align with model output bindings
 
 ### 4.3 Registry
 
@@ -245,10 +244,8 @@ Rules:
 
 Recommended fixtures:
 
-- fake run config
+- pipeline config
 - invalid config variants
-- fake robot profile
-- dummy model profile
 - built-in plugin registry
 - temporary run output directory
 - fake raw observation
@@ -309,8 +306,7 @@ tests/
   integration/
     test_fake_service_loop.py
   fixtures/
-    configs/
-    profiles/
+    config/
 ```
 
 This can be adjusted during implementation.

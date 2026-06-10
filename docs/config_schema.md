@@ -1,654 +1,429 @@
 # Config Schema
 
-This document defines the MVP configuration structure for the inference service framework.
+This document defines the current pipeline configuration shape for the inference service framework.
 
-MVP execution should be config-driven. A user should be able to change model runtime, robot mapping, adapters, processors, and logging behavior without editing framework core.
+The canonical example is:
 
-The examples below are target schemas. Exact Python validation models can be refined during implementation.
+```text
+config/pipeline_example.yaml
+```
+
+This schema is focused on a service-oriented runtime that receives requests, binds model inputs to transport topics, runs model pipelines, postprocesses model outputs, and publishes robot commands.
 
 ## 1. Config Goals
 
 The config system should:
 
-- assemble a runnable inference service
-- select model, robot, adapters, processors, and logging
-- validate missing or unknown components before execution
-- support fake end-to-end execution without ROS2/DDS/model dependencies
-- preserve run metadata for evaluation and reproducibility
+- assemble a runnable inference service from YAML
+- define request server endpoints
+- define robot command conventions and loop frequency
+- define one or more model pipelines
+- bind model inputs and outputs to external interfaces
+- preserve processor order exactly
+- fail early on malformed or unresolved config
 
 The config system should not:
 
 - contain executable code
-- hide plugin implementation details in arbitrary scripts
 - require framework core edits for a new model or robot
 - silently ignore unknown required fields
+- hide transport bindings inside model runtime code
 
-## 2. Config Files
+## 2. Config File
 
-MVP uses three primary config/profile file types.
-
-```text
-configs/
-  mvp_fake.yaml
-  mvp_g1_vla.yaml
-
-profiles/
-  robots/
-    fake_robot.yaml
-    unitree_g1.yaml
-  models/
-    dummy_model.yaml
-    openpi_vla.yaml
-```
-
-For docs examples, these can live under:
+The primary example lives under `config/`:
 
 ```text
-docs/examples/
-  mvp_run.yaml
-  robot_profile.yaml
-  model_profile.yaml
+config/
+  pipeline_example.yaml
 ```
 
-## 3. Main Run Config
-
-The main run config defines what components are connected for one service execution.
-
-Example:
+The config has three required top-level sections:
 
 ```yaml
-version: 1
-
-run:
-  name: mvp_fake
-  description: fake end-to-end inference service smoke run
-  seed: 0
-
-robot:
-  profile: fake_robot
-  observation_mapper: fake_observation_mapper
-  action_mapper: fake_action_mapper
-
-model:
-  profile: dummy_model
-  runtime: dummy_runtime
-  params:
-    latency_ms: 1
-
-input:
-  type: fake
-  params:
-    num_messages: 1
-    timeout_ms: 100
-
-output:
-  type: fake
-  params:
-    capture: true
-
-preprocess:
-  - type: identity
-  - type: dummy_input_builder
-
-postprocess:
-  - type: dummy_output_parser
-  - type: validate_action
-
-lifecycle:
-  warmup: true
-  max_iterations: 1
-  stop_on_error: true
-
-logging:
-  level: info
-  output_dir: runs/
-  write_resolved_config: true
-  write_iteration_summary: true
-```
-
-## 4. Main Run Config Schema
-
-### 4.1 Top-Level Fields
-
-```yaml
-version: 1
-run: {}
+request_server: {}
 robot: {}
-model: {}
-input: {}
-output: {}
-preprocess: []
-postprocess: []
-lifecycle: {}
-logging: {}
+pipeline: {}
 ```
 
-Required:
-
-- `version`
-- `run`
-- `robot`
-- `model`
-- `input`
-- `output`
-- `preprocess`
-- `postprocess`
-- `lifecycle`
-- `logging`
-
-### 4.2 `run`
+## 3. Full Example
 
 ```yaml
-run:
-  name: mvp_fake
-  description: optional text
-  seed: 0
-  tags:
-    - smoke
-    - fake
+request_server:
+  type: ros2
+  node_name: inferfw
+  services:
+    load_model: /inferfw/load_model
+    unload_model: /inferfw/unload_model
+    infer: /inferfw/infer
+    set_task: /inferfw/set_task
+    set_operation_mode: /inferfw/set_operation_mode
+
+robot:
+  name: g129dof
+  action_class: G1Action
+  loop_hz: 30.0
+  joint_config:
+    torso: 6
+    right_arm: 7
+    left_arm: 7
+    right_hand: 12
+    left_hand: 12
+  topics:
+    joint_command:
+      topic: /joint/command/joint_state
+      message_type: sensor_msgs/JointState
+    gripper_command:
+      topic: /gripper/command/joint_state
+      message_type: sensor_msgs/JointState
+
+pipeline:
+  name: g129dof_vla_test1
+  preprocess:
+    groups:
+      - keys:
+          - left_img
+          - left_wrist_img
+          - right_img
+          - right_wrist_img
+        steps:
+          - name: resize
+            params:
+              width: 224
+              height: 224
+              mode: bilinear
+  models:
+    g1_vla:
+      runtime: openpi
+      config_name: act_g1
+      model_path: /workspace/sim_models/act_sim_model/
+      input_interface:
+        bindings:
+          left_img:
+            topic: /cam/left/image_raw_color/compressed
+            message_type: sensor_msgs/CompressedImage
+          left_wrist_img:
+            topic: /left_hand/color/image_rect_raw
+            message_type: sensor_msgs/Image
+          right_img:
+            topic: /cam/right/image_raw_color/compressed
+            message_type: sensor_msgs/CompressedImage
+          right_wrist_img:
+            topic: /right_hand/color/image_rect_raw
+            message_type: sensor_msgs/Image
+          joint_state:
+            topic: /joint/state/joint_state
+            message_type: sensor_msgs/JointState
+      output_interface:
+        bindings:
+          actions:
+            type: joint_trajectory
+            groups:
+              - torso
+              - right_arm
+              - left_arm
+              - right_hand
+              - left_hand
+  postprocess:
+    groups:
+      - keys:
+          - actions
+        steps:
+          - name: resample_action
+            params:
+              target_hz: 30
+              tool_dim: 44
+          - name: skip_closest_action
+            params:
+              tool_dim: 44
+              min_remaining: 15
+              use_joint_distance: true
+          - name: smooth_action
+            params:
+              dt: 0.033333333333333
+              spline_length: 5
+              tool_dim: 44
+```
+
+## 4. `request_server`
+
+`request_server` defines how external clients control the service.
+
+```yaml
+request_server:
+  type: ros2
+  node_name: inferfw
+  services:
+    load_model: /inferfw/load_model
+    unload_model: /inferfw/unload_model
+    infer: /inferfw/infer
+    set_task: /inferfw/set_task
+    set_operation_mode: /inferfw/set_operation_mode
 ```
 
 Fields:
 
-- `name`: human-readable run name
-- `description`: optional run description
-- `seed`: optional deterministic seed
-- `tags`: optional labels for filtering
+- `type`: request server implementation, such as `ros2`
+- `node_name`: runtime node name
+- `services`: service names exposed by the request server
 
-The framework should generate a unique `run_id` at runtime.
+Required services for the current service shape:
 
-### 4.3 `robot`
+- `load_model`
+- `unload_model`
+- `infer`
+- `set_task`
+- `set_operation_mode`
+
+Validation:
+
+- request server type must be supported
+- service names must be non-empty strings
+- service keys required by the selected server type must exist
+
+## 5. `robot`
+
+`robot` defines robot-level execution conventions used by the pipeline output path.
 
 ```yaml
 robot:
-  profile: unitree_g1
-  observation_mapper: unitree_g1_observation_mapper
-  action_mapper: unitree_g1_action_mapper
-  params:
-    control_mode: joint_position
+  name: g129dof
+  action_class: G1Action
+  loop_hz: 30.0
+  joint_config:
+    torso: 6
+    right_arm: 7
+    left_arm: 7
+    right_hand: 12
+    left_hand: 12
+  topics:
+    joint_command:
+      topic: /joint/command/joint_state
+      message_type: sensor_msgs/JointState
 ```
 
 Fields:
 
-- `profile`: robot profile id or path
-- `observation_mapper`: registry key
-- `action_mapper`: registry key
-- `params`: optional robot integration params
+- `name`: robot id used in logs and runtime metadata
+- `action_class`: robot action representation or action mapper target
+- `loop_hz`: target command loop rate
+- `joint_config`: semantic joint groups and dimensions
+- `topics`: robot command publication targets
 
 Validation:
 
-- profile must resolve
-- mapper types must be registered
-- profile must satisfy mapper requirements when declared
+- `loop_hz` must be positive
+- joint group dimensions must be positive integers
+- command topics must include `topic` and `message_type`
+- processor output groups should be compatible with `joint_config`
 
-### 4.4 `model`
+## 6. `pipeline`
+
+`pipeline` defines preprocessing, model runtime bindings, and postprocessing.
 
 ```yaml
-model:
-  profile: openpi_vla
-  runtime: openpi_torch
-  params:
-    device: cuda:0
-    checkpoint: /models/openpi/checkpoint.pt
+pipeline:
+  name: g129dof_vla_test1
+  preprocess: {}
+  models: {}
+  postprocess: {}
 ```
 
 Fields:
 
-- `profile`: model profile id or path
-- `runtime`: model runtime registry key
-- `params`: runtime-specific params
+- `name`: pipeline id used in logs and runtime metadata
+- `preprocess`: grouped processors that run before model inference
+- `models`: named model runtime configurations
+- `postprocess`: grouped processors that run after model inference
 
-Validation:
+## 7. Processor Groups
 
-- profile must resolve
-- runtime type must be registered
-- required runtime params must exist when declared by the plugin or profile
-
-### 4.5 `input`
-
-```yaml
-input:
-  type: ros2
-  params:
-    observation_topic: /robot/observation
-    timeout_ms: 100
-```
-
-Fields:
-
-- `type`: input adapter registry key
-- `params`: adapter-specific params
-
-Validation:
-
-- adapter type must be registered
-- timeout behavior should be explicit for adapters that block
-
-### 4.6 `output`
-
-```yaml
-output:
-  type: unitree_dds
-  params:
-    domain_id: 0
-```
-
-Fields:
-
-- `type`: output adapter registry key
-- `params`: adapter-specific params
-
-Validation:
-
-- adapter type must be registered
-- required output params must exist
-
-### 4.7 `preprocess` and `postprocess`
-
-Processor lists are ordered.
+Preprocess and postprocess use grouped processors. A group applies ordered `steps` to one or more data `keys`.
 
 ```yaml
 preprocess:
-  - type: resize_image
-    params:
-      camera: front
-      width: 224
-      height: 224
-  - type: openpi_input_builder
-
-postprocess:
-  - type: openpi_output_parser
-  - type: clamp_joint_limits
-    params:
-      source: robot_profile
-```
-
-Processor fields:
-
-- `type`: processor registry key
-- `params`: optional processor-specific params
-- `enabled`: optional boolean, defaults to true
-
-Validation:
-
-- processor type must be registered
-- disabled processors may be skipped
-- each processor config must match the processor's declared requirements when available
-
-### 4.8 `lifecycle`
-
-```yaml
-lifecycle:
-  warmup: true
-  max_iterations: 1
-  loop_hz: 10
-  stop_on_error: true
-  pause_policy:
-    read_input: true
-    run_inference: false
-    publish_output: false
-```
-
-Fields:
-
-- `warmup`: whether to run warmup before normal inference
-- `max_iterations`: optional finite iteration limit for smoke tests
-- `loop_hz`: optional target loop frequency
-- `stop_on_error`: whether first loop error stops service
-- `pause_policy`: optional pause behavior
-
-MVP default pause policy:
-
-```yaml
-pause_policy:
-  read_input: true
-  run_inference: false
-  publish_output: false
-```
-
-### 4.9 `logging`
-
-```yaml
-logging:
-  level: info
-  output_dir: runs/
-  write_resolved_config: true
-  write_iteration_summary: true
-  include_data_summaries: true
-```
-
-Fields:
-
-- `level`: debug, info, warning, error
-- `output_dir`: base directory for run logs
-- `write_resolved_config`: save final resolved config
-- `write_iteration_summary`: save per-iteration summaries
-- `include_data_summaries`: log keys/shapes/dtypes where possible
-
-MVP logs should not serialize full images or large tensors by default.
-
-## 5. Robot Profile Schema
-
-Robot profile describes robot metadata and conventions.
-
-Example:
-
-```yaml
-version: 1
-
-id: fake_robot
-name: Fake Robot
-
-joints:
   groups:
-    arm:
-      names:
-        - joint_1
-        - joint_2
-      limits:
-        position:
-          min: [-1.0, -1.0]
-          max: [1.0, 1.0]
-        velocity:
-          max: [2.0, 2.0]
-
-sensors:
-  cameras:
-    front:
-      width: 640
-      height: 480
-      channels: 3
-      encoding: rgb8
-      frame_id: camera_front
-
-frames:
-  base: base_link
-  world: world
-
-commands:
-  default_mode: joint_position
-  frequency_hz: 10
-
-io_presets:
-  fake:
-    input:
-      type: fake
-    output:
-      type: fake
+    - keys:
+        - left_img
+        - right_img
+      steps:
+        - name: resize
+          params:
+            width: 224
+            height: 224
+            mode: bilinear
 ```
 
-### Required Robot Profile Fields
+Processor group fields:
 
-- `version`
-- `id`
-- `name`
+- `keys`: data keys the group applies to
+- `steps`: ordered processor steps
 
-MVP fake profile should define at least:
+Processor step fields:
 
-- one joint group
-- one camera or image-like sensor
-- one command convention
+- `name`: processor registry key
+- `params`: optional processor-specific params
 
-Real robot profiles should define:
+Validation:
 
-- joint groups
-- joint limits
-- sensor metadata
-- frame metadata
-- command conventions
-- IO presets, if useful
+- processor names must resolve
+- `keys` must be non-empty
+- `steps` must preserve YAML order
+- preprocess keys should exist in at least one model input binding unless the processor creates them
+- postprocess keys should exist in model output bindings or be produced by an earlier postprocess step
 
-## 6. Model Profile Schema
+## 8. `pipeline.models`
 
-Model profile describes model IO contracts and runtime requirements.
-
-Example:
+`pipeline.models` is a mapping from model id to model runtime configuration.
 
 ```yaml
-version: 1
-
-id: dummy_model
-name: Dummy Model
-
-runtime:
-  default: dummy_runtime
-  supported:
-    - dummy_runtime
-
-input_schema:
-  required:
-    image:
-      dtype: float32
-      shape: [1, 3, 224, 224]
-    proprio:
-      dtype: float32
-      shape: [1, 2]
-
-output_schema:
-  required:
-    action:
-      dtype: float32
-      shape: [1, 2]
-
-frequency:
-  target_hz: 10
-
-latency:
-  expected_ms: 1
-
-artifact:
-  type: none
-
-warmup:
-  sample: generated
+models:
+  g1_vla:
+    runtime: openpi
+    config_name: act_g1
+    model_path: /workspace/sim_models/act_sim_model/
+    input_interface:
+      bindings:
+        left_img:
+          topic: /cam/left/image_raw_color/compressed
+          message_type: sensor_msgs/CompressedImage
+    output_interface:
+      bindings:
+        actions:
+          type: joint_trajectory
+          groups:
+            - torso
+            - right_arm
 ```
 
-### Required Model Profile Fields
+Model fields:
 
-- `version`
-- `id`
-- `name`
-- `runtime`
-- `input_schema`
-- `output_schema`
+- `runtime`: model runtime plugin key
+- `config_name`: model-specific runtime config name or preset name
+- `model_path`: model artifact path
+- `input_interface.bindings`: named input bindings consumed by the model
+- `output_interface.bindings`: named output bindings produced by the model
 
-Real model profiles should also define:
+`runtime` resolves to a model runtime key provided by core or an external model plugin package. For example, an `inferfw-openpi` package can provide the `openpi` runtime and OpenPI-specific processors through package entry points.
 
-- artifact location or resolution rule
-- device requirements
-- preprocessing expectations
-- output conventions
-- warmup sample strategy
+`config_name` is passed to the selected runtime as model-specific configuration. For OpenPI, this can be the OpenPI train config name such as `act_g1`.
 
-## 7. Plugin References
+Input binding fields:
 
-MVP uses registry keys for plugin references.
+- `topic`: external source topic
+- `message_type`: transport message type
 
-Examples:
+Output binding fields are output-specific. For joint trajectory outputs, expected fields are:
 
-```yaml
-input:
-  type: fake
+- `type`: output semantic type, such as `joint_trajectory`
+- `groups`: robot joint groups the action targets
 
-model:
-  runtime: dummy_runtime
+Validation:
 
-preprocess:
-  - type: dummy_input_builder
-```
+- model ids must be unique
+- `runtime` must resolve to a model runtime plugin
+- `config_name` must be present when required by the selected runtime
+- `model_path` must be present for runtimes that load artifacts
+- input binding keys must be unique within a model
+- output binding keys must be unique within a model
+- output groups should exist in `robot.joint_config`
 
-Rules:
-
-- registry key names should be stable
-- config validation fails if a key cannot be resolved
-- package discovery is not required for MVP
-- aliases may be added later, but canonical keys should be logged
-
-## 8. Resolved Config
+## 9. Resolved Config
 
 The runtime should produce a resolved config snapshot after validation.
 
 Resolved config should include:
 
-- generated `run_id`
 - config file path
-- robot profile content or resolved path
-- model profile content or resolved path
-- canonical plugin keys
-- processor chain after disabled items are removed
-- logging output path
+- selected request server type
+- robot name and joint configuration
+- pipeline name
+- resolved processor names
+- resolved model runtime keys and config names
+- model artifact paths
+- input and output bindings
 
-The resolved config snapshot should be written to the run output directory when `write_resolved_config` is enabled.
+The resolved config snapshot should be written to the run output directory when logging support is enabled.
 
-## 9. Validation Rules
+## 10. Validation Rules
 
-MVP validation should fail before service execution when:
+Validation should fail before service execution when:
 
 - required top-level section is missing
-- config version is unsupported
-- robot profile cannot be found
-- model profile cannot be found
-- adapter type is not registered
-- mapper type is not registered
-- model runtime type is not registered
-- processor type is not registered
-- required adapter params are missing
-- required model runtime params are missing
-- processor config is malformed
-- logging output directory cannot be created
-- model profile runtime does not allow selected runtime
+- request server type is unsupported
+- required request service is missing
+- robot loop rate is invalid
+- joint group dimension is invalid
+- command topic config is malformed
+- pipeline name is missing
+- model config is missing required fields
+- model runtime cannot be resolved
+- processor name cannot be resolved
+- processor group is malformed
+- preprocess/postprocess keys cannot be connected to model bindings
+- output action groups do not match robot joint groups
 
 Validation warnings may be used for:
 
 - unknown optional fields
-- missing latency hints
-- missing IO presets
-- missing warmup sample
-- profile fields unused by MVP
+- `model_path` existence checks skipped in a remote runtime
+- processor keys intentionally created by earlier processors
+- output bindings with runtime-specific fields that core does not inspect
 
-## 10. Example Fake Run Config
+## 11. Concept Reference Implementation
 
-```yaml
-version: 1
+`refer/inferfw` is a concept reference for the model runtime boundary, not the full service implementation.
 
-run:
-  name: mvp_fake
-  tags: [smoke, fake]
+It currently demonstrates:
 
-robot:
-  profile: fake_robot
-  observation_mapper: fake_observation_mapper
-  action_mapper: fake_action_mapper
+- `ModelRuntime` as a plugin contract
+- `ModelInput` and `ModelOutput` as backend-agnostic model boundary containers
+- entry point based model runtime resolution
+- a minimal `ModelRuntimeSession` for `load_model -> warmup -> infer -> unload`
+- latency measurement around model inference
 
-model:
-  profile: dummy_model
-  runtime: dummy_runtime
-  params:
-    latency_ms: 1
+It does not yet implement the full `request_server -> pipeline -> robot output` service loop described by this config schema.
 
-input:
-  type: fake
-  params:
-    num_messages: 1
-    timeout_ms: 100
+`refer/inferfw-openpi` is a concept reference for an external model plugin package. It demonstrates how OpenPI can be installed separately, register an `openpi` model runtime entry point, load a trained policy in-process, and convert between OpenPI-specific data and `ModelInput` / `ModelOutput`.
 
-output:
-  type: fake
-  params:
-    capture: true
+In the full service, OpenPI-specific preprocess and postprocess steps should also be plugin-owned:
 
-preprocess:
-  - type: identity
-  - type: dummy_input_builder
+- `openpi_input_builder`: robot/pipeline data to OpenPI-compatible `ModelInput`
+- `openpi_output_parser`: OpenPI `ModelOutput` to action data consumed by later postprocess or robot mapping
 
-postprocess:
-  - type: dummy_output_parser
-  - type: validate_action
+The core package should not define OpenPI-specific public input/output container types. OpenPI payload shape should be expressed as the `ModelInput.data` / `ModelOutput.data` schema owned by the OpenPI plugin. The service contract remains:
 
-lifecycle:
-  warmup: true
-  max_iterations: 1
-  stop_on_error: true
-
-logging:
-  level: info
-  output_dir: runs/
-  write_resolved_config: true
-  write_iteration_summary: true
-  include_data_summaries: true
+```text
+openpi_input_builder -> ModelInput -> OpenPiModelRuntime -> ModelOutput -> openpi_output_parser
 ```
 
-## 11. Example Real-Oriented Run Config
+Expected OpenPI payload example:
 
-This config is a target shape for real integration. It may not run until concrete plugins exist.
+```python
+ModelInput.data == {
+    "state": state_vector,
+    "images": {
+        "cam_high_left": image_tensor,
+        "cam_high_right": image_tensor,
+        "cam_left_wrist": image_tensor,
+        "cam_right_wrist": image_tensor,
+    },
+    "prompt": instruction_text,
+}
 
-```yaml
-version: 1
-
-run:
-  name: g1_openpi_vla
-  tags: [unitree_g1, openpi, vla]
-
-robot:
-  profile: unitree_g1
-  observation_mapper: unitree_g1_observation_mapper
-  action_mapper: unitree_g1_action_mapper
-
-model:
-  profile: openpi_vla
-  runtime: openpi_torch
-  params:
-    device: cuda:0
-    checkpoint: /models/openpi/checkpoint.pt
-
-input:
-  type: ros2
-  params:
-    observation_topic: /g1/observation
-    timeout_ms: 100
-
-output:
-  type: unitree_dds
-  params:
-    domain_id: 0
-    command_topic: lowcmd
-
-preprocess:
-  - type: resize_image
-    params:
-      camera: front
-      width: 224
-      height: 224
-  - type: openpi_input_builder
-
-postprocess:
-  - type: openpi_output_parser
-  - type: clamp_joint_limits
-    params:
-      source: robot_profile
-
-lifecycle:
-  warmup: true
-  loop_hz: 10
-  stop_on_error: true
-
-logging:
-  level: info
-  output_dir: runs/
-  write_resolved_config: true
-  write_iteration_summary: true
-  include_data_summaries: true
+ModelOutput.data == {
+    "actions": action_chunk,
+}
 ```
 
-## 12. MVP Config Acceptance Criteria
+## 12. Acceptance Criteria
 
 The config schema is acceptable when:
 
-- fake run config can validate without ROS2, DDS, GPU, or model artifacts
-- unresolved plugin keys fail during validation
-- missing profiles fail during validation
+- `config/pipeline_example.yaml` parses as YAML
+- required top-level sections are present
 - processor order is preserved exactly
-- disabled processors are omitted from resolved chain
-- resolved config can be written to a run output directory
-- model runtime can be changed without editing robot config
-- robot mapper can be changed without editing model config
+- preprocess keys align with model input bindings
+- postprocess keys align with model output bindings
+- output action groups align with robot joint groups
+- malformed service, model, processor, or binding config fails before runtime starts

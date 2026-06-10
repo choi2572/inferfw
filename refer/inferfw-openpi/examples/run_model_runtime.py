@@ -30,8 +30,6 @@ import tyro
 from inferfw.core.model_runtime_session import ModelRuntimeSession
 from inferfw.data.model import ModelInput
 from inferfw.data.model import ModelOutput
-from inferfw.data.pi import PIInput
-from inferfw.data.pi import PIOutput
 from inferfw.registry.registry import create_model_runtime
 
 
@@ -46,23 +44,31 @@ class Args:
     config_name: str = "pi0_aloha_sim"
     model_path: str = "gs://openpi-assets/checkpoints/pi0_aloha_sim"
 
-    # Task instruction passed in PIInput.data["prompt"].
+    # Task instruction passed in ModelInput.data["prompt"].
     prompt: str = "pick up the block"
 
 
 def build_model_input(prompt: str) -> ModelInput:
     """Build one ModelInput for π/openpi runtimes.
 
-    Replace this with your robot preprocess output when integrating elsewhere.
+    Replace this with openpi_input_builder output when integrating elsewhere.
     """
-    pi_input = PIInput()
-    pi_input.data["prompt"] = prompt
-    return pi_input.to_model_input()
+    return ModelInput.from_dict(
+        {
+            "state": np.zeros(44, dtype=np.float64),
+            "images": {
+                "cam_high_left": np.zeros((3, 500, 800), dtype=np.uint8),
+                "cam_high_right": np.zeros((3, 500, 800), dtype=np.uint8),
+                "cam_left_wrist": np.zeros((3, 480, 640), dtype=np.uint8),
+                "cam_right_wrist": np.zeros((3, 480, 640), dtype=np.uint8),
+            },
+            "prompt": prompt,
+        }
+    )
 
 
 def print_output(output: ModelOutput, latency_ms: float) -> None:
-    pi_output = PIOutput.from_model_output(output)
-    actions = pi_output.actions
+    actions = np.asarray(output.data["actions"], dtype=np.float64)
     logging.info("infer latency_ms=%.2f", latency_ms)
     logging.info("actions shape=%s", actions.shape)
     logging.info("actions[0][:8]=%s", actions[0, : min(8, actions.shape[1])])

@@ -27,7 +27,7 @@ The service runs as one local process.
 Included:
 
 - one CLI entrypoint
-- one loaded run config
+- one loaded pipeline config
 - one lifecycle state machine
 - one service loop
 - one logging output directory per run
@@ -68,15 +68,12 @@ The run must be assembled from YAML config.
 
 Config chooses:
 
-- robot profile
-- model profile
-- input adapter
-- output adapter
-- observation mapper
-- action mapper
+- request server type and service endpoints
+- robot command conventions and topics
+- model runtime keys, runtime config names, and artifact paths
+- input and output interface bindings
 - preprocessors
 - postprocessors
-- logging settings
 - runtime settings
 
 MVP does not require a full config override system, but config validation must happen before execution.
@@ -201,8 +198,8 @@ MVP should expose a minimal CLI.
 Target commands:
 
 ```bash
-inferfw validate --config configs/mvp_fake.yaml
-inferfw run --config configs/mvp_fake.yaml
+inferfw validate --config config/pipeline_example.yaml
+inferfw run --config config/pipeline_example.yaml
 inferfw list-plugins
 ```
 

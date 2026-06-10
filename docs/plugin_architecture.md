@@ -15,7 +15,7 @@ The plugin architecture should make it possible to:
 - test the full service loop with fake plugins
 - keep core free of robot/model-specific semantics
 
-The MVP plugin system should stay simple. Local registry-based plugins are enough for the first implementation.
+The MVP plugin system should stay simple, but it must allow model and robot integrations to live outside the core package. A package such as `inferfw-openpi` should be able to provide a model runtime and model-specific processors without editing `inferfw`.
 
 ## 2. Plugin Boundary
 
@@ -39,8 +39,8 @@ Plugins own:
 - concrete `ObservationMapper`
 - concrete `ActionMapper`
 - concrete `Processor`
-- robot profiles
-- model profiles
+- robot metadata and command conventions
+- model IO schemas or runtime presets
 - robot/model-specific helper logic
 
 Core must not import concrete robot or model plugins directly inside service logic.
@@ -161,8 +161,8 @@ ModelRuntime
 
 Examples:
 
-- `dummy_runtime`
-- `openpi_torch`
+- `dummy`
+- `openpi`
 - `onnx_runtime`, future
 - `tensorrt_runtime`, future
 - `remote_http_runtime`, future
@@ -175,9 +175,9 @@ Responsibilities:
 - run inference
 - unload resources
 
-## 4. Local Registry
+## 4. Registry and Discovery
 
-MVP uses a local in-process registry.
+MVP uses an in-process registry. Built-in plugins may be registered explicitly. External packages may use Python package entry points for discovery.
 
 Conceptual structure:
 
@@ -191,7 +191,7 @@ class PluginRegistry:
     model_runtimes: dict[str, type[ModelRuntime]]
 ```
 
-Registration example:
+Explicit registration example:
 
 ```python
 registry.register_input_adapter("fake", FakeInputAdapter)
@@ -201,15 +201,30 @@ registry.register_action_mapper("fake_action_mapper", FakeActionMapper)
 registry.register_processor("identity", IdentityProcessor)
 registry.register_processor("dummy_input_builder", DummyInputBuilder)
 registry.register_processor("dummy_output_parser", DummyOutputParser)
-registry.register_model_runtime("dummy_runtime", DummyModelRuntime)
+registry.register_model_runtime("dummy", DummyModelRuntime)
+registry.register_model_runtime("openpi", OpenPiModelRuntime)
 ```
 
 Resolution example:
 
 ```python
-input_cls = registry.get_input_adapter(config.input.type)
-runtime_cls = registry.get_model_runtime(config.model.runtime)
-processor_cls = registry.get_processor(processor_config.type)
+runtime_cls = registry.get_model_runtime(model_config.runtime)
+processor_cls = registry.get_processor(processor_step.name)
+```
+
+Entry point example for an external model runtime package:
+
+```toml
+[project.entry-points."inferfw.model_runtime"]
+openpi = "inferfw_openpi.runtime:OpenPiModelRuntime"
+```
+
+Processor discovery may use a separate entry point group when processor packages move out of core:
+
+```toml
+[project.entry-points."inferfw.processor"]
+openpi_input_builder = "inferfw_openpi.processors:OpenPiInputBuilder"
+openpi_output_parser = "inferfw_openpi.processors:OpenPiOutputParser"
 ```
 
 ## 5. Built-In MVP Plugins
@@ -226,7 +241,7 @@ Required built-ins:
 - `dummy_input_builder` processor
 - `dummy_output_parser` processor
 - `validate_action` processor
-- `dummy_runtime` model runtime
+- `dummy` model runtime
 
 Optional early stubs:
 
@@ -248,11 +263,9 @@ inferfw/
       adapters.py
       mappers.py
       processors.py
-      profile.yaml
     dummy_model/
       runtime.py
       processors.py
-      model_profile.yaml
     ros2/
       input_adapter.py
     unitree_dds/
@@ -266,21 +279,21 @@ inferfw_unitree_g1/
   observation_mapper.py
   action_mapper.py
   processors.py
-  robot_profile.yaml
+  metadata.py
   register.py
 
 inferfw_openpi/
   runtime.py
   processors.py
-  model_profile.yaml
-  register.py
+  io_schema.py
+  pyproject.toml
 ```
 
-MVP can keep plugins inside the repository until the core contracts stabilize.
+MVP can keep fake plugins inside the repository until the core contracts stabilize. Model integrations such as OpenPI should be designed as separate installable packages.
 
 ## 7. Plugin Registration Policy
 
-MVP registration can be explicit.
+Core built-ins may be registered explicitly.
 
 Example:
 
@@ -299,50 +312,138 @@ def register(registry: PluginRegistry) -> None:
 
 The service startup may call known registration functions before config validation.
 
-Package entry points are not required in MVP.
+External packages may also expose Python entry points. The `refer/inferfw-openpi` concept package demonstrates this for model runtimes with:
+
+```toml
+[project.entry-points."inferfw.model_runtime"]
+openpi = "inferfw_openpi.runtime:OpenPiModelRuntime"
+```
+
+The registry should fail clearly when a selected plugin is not installed or cannot be imported.
 
 ## 8. Plugin Config
 
 Plugins receive config through their `configure` method.
 
-Example adapter config:
+Pipeline config selects plugins by names in processor steps and model config names.
 
 ```yaml
-input:
-  type: fake
-  params:
-    num_messages: 1
-    timeout_ms: 100
-```
-
-Example processor config:
-
-```yaml
-preprocess:
-  - type: resize_image
-    params:
-      camera: front
-      width: 224
-      height: 224
-```
-
-Example model runtime config:
-
-```yaml
-model:
-  profile: openpi_vla
-  runtime: openpi_torch
-  params:
-    device: cuda:0
-    checkpoint: /models/openpi/checkpoint.pt
+pipeline:
+  preprocess:
+    groups:
+      - keys: [left_img, right_img]
+        steps:
+          - name: resize
+            params:
+              width: 224
+              height: 224
+          - name: openpi_input_builder
+  models:
+    g1_vla:
+      runtime: openpi
+      config_name: act_g1
+      model_path: /workspace/sim_models/openpi_checkpoint/
+      input_interface:
+        bindings:
+          left_img:
+            topic: /cam/left/image_raw_color/compressed
+            message_type: sensor_msgs/CompressedImage
+  postprocess:
+    groups:
+      - keys: [actions]
+        steps:
+          - name: openpi_output_parser
 ```
 
 Rules:
 
-- `type` or `runtime` selects registry key
-- `params` are plugin-specific
+- processor `name` selects a processor registry key
+- model `runtime` selects a model runtime plugin key
+- model `config_name` is passed to the selected runtime as model-specific configuration
+- `model_path` is passed to runtimes that load artifacts
+- processor `params` are plugin-specific
 - plugin-specific params should be documented by the plugin owner
 - validation should catch missing required params before `RUNNING`
+
+For the OpenPI concept package, runtime params are derived from:
+
+```yaml
+runtime: openpi
+config_name: act_g1
+model_path: /workspace/sim_models/openpi_checkpoint/
+```
+
+The runtime then loads the OpenPI policy in-process and calls `Policy.infer`.
+
+## 8.1 External OpenPI Package Concept
+
+`refer/inferfw-openpi` is a concept reference for a separately distributed model plugin package.
+
+It demonstrates:
+
+- package name: `inferfw-openpi`
+- import package: `inferfw_openpi`
+- entry point key: `openpi`
+- runtime class: `OpenPiModelRuntime`
+- dependency isolation: `openpi` is a dependency of `inferfw-openpi`, not `inferfw`
+- in-process policy execution, not a WebSocket bridge
+
+The example script `refer/inferfw-openpi/examples/run_model_runtime.py` demonstrates the intended integration path:
+
+```text
+create_model_runtime("openpi", params)
+  -> ModelRuntimeSession
+  -> startup(load_model + warmup)
+  -> infer(ModelInput)
+  -> ModelOutput
+```
+
+In the full service, robot observations should be converted to OpenPI-compatible `ModelInput` by preprocessors such as `openpi_input_builder`. OpenPI-specific model outputs should be parsed by postprocessors such as `openpi_output_parser`. Those processors belong in the OpenPI plugin package, not in framework core.
+
+Framework core should expose only the generic `ModelInput` / `ModelOutput` containers at the model runtime boundary. The OpenPI plugin should document the expected `ModelInput.data` and `ModelOutput.data` keys instead of introducing separate public input/output container types.
+
+Example plugin-owned processor shape:
+
+```python
+import numpy as np
+
+from inferfw.data.model import ModelInput
+from inferfw.data.model import ModelOutput
+
+
+class OpenPiInputBuilder:
+    def process(self, observation: CanonicalObservation) -> ModelInput:
+        return ModelInput.from_dict(
+            {
+                "state": np.asarray(build_openpi_state(observation), dtype=np.float64),
+                "images": {
+                    "cam_high_left": build_openpi_image(observation, "cam_high_left"),
+                    "cam_high_right": build_openpi_image(observation, "cam_high_right"),
+                    "cam_left_wrist": build_openpi_image(observation, "cam_left_wrist"),
+                    "cam_right_wrist": build_openpi_image(observation, "cam_right_wrist"),
+                },
+                "prompt": observation.metadata["instruction"],
+            }
+        )
+
+
+class OpenPiOutputParser:
+    def process(self, output: ModelOutput) -> CanonicalAction:
+        actions = np.asarray(output.data["actions"], dtype=np.float64)
+        return build_canonical_action_from_openpi_actions(actions)
+```
+
+The runtime then stays thin:
+
+```text
+OpenPiInputBuilder
+  -> ModelInput.data: {"state", "images", "prompt"}
+  -> OpenPiModelRuntime.infer(ModelInput)
+  -> ModelOutput.data: {"actions"}
+  -> OpenPiOutputParser
+```
+
+The exact OpenPI key names, image layout, state dimension, action shape, and dtype rules should be documented in the OpenPI plugin docs and validated by `OpenPiInputBuilder` / `OpenPiOutputParser` where practical.
 
 ## 9. Plugin Metadata
 
@@ -351,7 +452,7 @@ MVP does not require a full metadata schema, but plugins should expose enough in
 Recommended metadata:
 
 ```python
-PLUGIN_NAME = "dummy_runtime"
+PLUGIN_NAME = "dummy"
 PLUGIN_KIND = "model_runtime"
 PLUGIN_VERSION = "0.1.0"
 ```
@@ -372,11 +473,10 @@ MVP compatibility checks should happen during `configure`.
 Checks:
 
 - selected plugin key exists
-- selected model runtime is allowed by model profile
 - selected mapper exists
 - selected processors exist
-- robot profile exists
-- model profile exists
+- selected model runtime or runtime preset exists
+- selected model binding schema is valid
 - processor chain final output expectations are documented or validated where possible
 
 Future compatibility checks:
@@ -440,11 +540,16 @@ Required MVP tests:
 
 The end-to-end smoke test should use only fake and dummy plugins.
 
-## 14. Future Plugin Discovery
+## 14. Plugin Discovery Scope
 
-After MVP, plugin discovery may use Python package entry points.
+Typed package entry points are allowed for externally distributed plugins, especially model runtimes:
 
-Potential shape:
+```toml
+[project.entry-points."inferfw.model_runtime"]
+openpi = "inferfw_openpi.runtime:OpenPiModelRuntime"
+```
+
+Bulk plugin registration through a generic plugin entry point can remain future work:
 
 ```toml
 [project.entry-points."inferfw.plugins"]
@@ -452,7 +557,7 @@ unitree_g1 = "inferfw_unitree_g1:register"
 openpi = "inferfw_openpi:register"
 ```
 
-This is intentionally out of MVP scope. The MVP registry should be simple enough to debug without package discovery behavior.
+The registry should remain simple enough to debug. A missing optional package should fail during validation or plugin resolution with a clear error.
 
 ## 15. MVP Plugin Acceptance Criteria
 

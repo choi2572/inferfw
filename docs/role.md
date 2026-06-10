@@ -80,7 +80,7 @@ Model developers own model runtime behavior and model-specific transformations.
 - implement `ModelRuntime`
 - define model input/output schema
 - implement model-specific preprocess/postprocess processors
-- provide model profile
+- provide model metadata, runtime presets, or schemas needed by validation
 - provide model artifact metadata
 - optionally provide warmup sample input
 - document runtime dependencies such as Torch, TensorRT, ONNX Runtime, tokenizers, or remote API clients
@@ -90,13 +90,15 @@ Model developers own model runtime behavior and model-specific transformations.
 Example plugin area:
 
 ```text
-plugins/
-  openpi_vla/
-    runtime.py
-    processors.py
-    model_profile.yaml
-    warmup_sample.npz
+inferfw_openpi/
+  runtime.py
+  processors.py
+  io_schema.py
+  warmup.py
+  pyproject.toml
 ```
+
+The package can be distributed separately from framework core. For example, `inferfw-openpi` may depend on `openpi`, register an `openpi` `ModelRuntime`, and provide `openpi_input_builder` / `openpi_output_parser` processors.
 
 ### Must Implement
 
@@ -248,34 +250,48 @@ Integration users assemble the final runtime configuration for a model evaluatio
 Example config area:
 
 ```text
-configs/
-  mvp_vla_g1.yaml
-  mvp_vla_fake.yaml
+config/
+  pipeline_example.yaml
 ```
 
-Example run config:
+Example pipeline config:
 
 ```yaml
+request_server:
+  type: ros2
+  node_name: inferfw
+
 robot:
-  profile: unitree_g1
+  name: g129dof
+  action_class: G1Action
+  loop_hz: 30.0
 
-model:
-  profile: openpi_vla
-  runtime: openpi_torch
-
-input:
-  preset: unitree_ros2_default
-
-output:
-  preset: unitree_dds_default
-
-preprocess:
-  - type: resize_image
-  - type: openpi_input_builder
-
-postprocess:
-  - type: openpi_output_parser
-  - type: clamp_joint_limits
+pipeline:
+  name: g129dof_vla_test1
+  preprocess:
+    groups:
+      - keys: [left_img, right_img]
+        steps:
+          - name: resize
+  models:
+    g1_vla:
+      runtime: openpi
+      config_name: act_g1
+      model_path: /workspace/sim_models/act_sim_model/
+      input_interface:
+        bindings:
+          left_img:
+            topic: /cam/left/image_raw_color/compressed
+            message_type: sensor_msgs/CompressedImage
+      output_interface:
+        bindings:
+          actions:
+            type: joint_trajectory
+  postprocess:
+    groups:
+      - keys: [actions]
+        steps:
+          - name: smooth_action
 ```
 
 ### Does Not Own

@@ -9,7 +9,6 @@ import pytest
 
 from inferfw.core.model_runtime_session import ModelRuntimeSession
 from inferfw.data.model import ModelInput
-from inferfw.data.pi import PIInput
 from inferfw.registry.registry import create_model_runtime
 from inferfw.registry.registry import get_model_runtime_class
 
@@ -31,11 +30,10 @@ def test_dummy_runtime_via_entry_point():
     assert latency_ms >= 0.0
 
 
-def test_pi_input_converts_to_model_input():
-    pi_input = PIInput.from_dict({"state": np.ones(44), "prompt": "pick"})
-    model_input = pi_input.to_model_input()
+def test_model_input_carries_backend_specific_payload():
+    model_input = ModelInput.from_dict({"state": np.ones(44), "prompt": "pick"})
     assert model_input.data["prompt"] == "pick"
-    assert PIInput.from_model_input(model_input).data["prompt"] == "pick"
+    assert model_input.data["state"].shape == (44,)
 
 
 def test_openpi_runtime_class_is_registered_when_plugin_installed():

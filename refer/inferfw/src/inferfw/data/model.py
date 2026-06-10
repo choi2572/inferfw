@@ -10,7 +10,7 @@ from typing import Any
 class ModelInput:
     """Payload passed into ModelRuntime.infer after preprocess.
 
-    Backends may use different dict schemas. π/VLA uses PIInput as a typed helper.
+    Backends may use different dict schemas. Model-specific builders own those schemas.
     """
 
     data: dict[str, Any]

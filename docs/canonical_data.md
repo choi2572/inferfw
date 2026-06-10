@@ -285,6 +285,7 @@ Rules:
 - model profile defines expected keys, shapes, dtypes, and conventions
 - `ModelRuntime` validates or assumes the contract declared by the model profile
 - robot-specific raw fields should not leak into `ModelInput` unless intentionally passed through
+- model-specific builders should encode backend payloads directly in `ModelInput.data`
 
 ## 7. ModelOutput
 
@@ -315,6 +316,7 @@ Rules:
 - `ModelRuntime` produces `ModelOutput`
 - model profile defines output keys, shapes, dtypes, and conventions
 - postprocess chain converts `ModelOutput` into `CanonicalAction`
+- model-specific parsers should decode backend payloads directly from `ModelOutput.data`
 
 ## 8. CanonicalAction
 

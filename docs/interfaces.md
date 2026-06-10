@@ -221,11 +221,14 @@ Example:
 
 ```yaml
 preprocess:
-  - type: resize_image
-    params:
-      width: 224
-      height: 224
-  - type: openpi_input_builder
+  groups:
+    - keys: [left_img, right_img]
+      steps:
+        - name: resize
+          params:
+            width: 224
+            height: 224
+        - name: openpi_input_builder
 ```
 
 Conceptual runner:
@@ -238,6 +241,8 @@ return data
 ```
 
 For MVP, preprocess chain final output must be valid `ModelInput`, and postprocess chain final output must be valid `CanonicalAction`.
+
+Model-specific processors such as `openpi_input_builder` and `openpi_output_parser` should live in the model plugin package. Framework core owns the processor interface and chain execution, not OpenPI-specific tensor or action semantics.
 
 ## 9. ModelRuntime
 
